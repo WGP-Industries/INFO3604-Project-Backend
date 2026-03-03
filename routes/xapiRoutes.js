@@ -9,6 +9,12 @@ import User from '../models/User.js';
 
 const xapiRouter = Router();
 
+const populateStatement = (query) =>
+    query
+        .populate('user', 'username email')
+        .populate('course', 'courseCode name')
+        .populate('group', 'name slug');
+
 // POST /api/xapi
 xapiRouter.post('/', auth.protect, async (req, res) => {
     const { statement, additionalData } = req.body;
@@ -17,8 +23,7 @@ xapiRouter.post('/', auth.protect, async (req, res) => {
         return res.status(400).json({ message: 'xAPI statement is required' });
     }
 
-    // Resolve course from the verb URI
-    // e.g. "https://example.edu/comp3609/xapi/verbs/implemented" resolves to COMP3609
+    // Resolve course from verb URI
     let course = null;
     const verbUri = statement.verb?.id || '';
     if (verbUri.includes('example.edu')) {
@@ -26,20 +31,26 @@ xapiRouter.post('/', auth.protect, async (req, res) => {
         if (courseCode) course = await Course.findOne({ courseCode });
     }
 
-    // Resolve group from the user's enrollment in this course
-    let group = null;
+    // Resolve group ObjectId from the user's enrollment
+    let groupId = null;
     if (course) {
         const enrollment = await Enrollment.findOne({
             user: req.user._id,
             course: course._id,
         });
-        group = enrollment?.group ?? null;
+        groupId = enrollment?.group ?? null;
     }
+
+    const extensions = statement.context?.extensions ?? {};
+    const stage = extensions['https://example.edu/xapi/extensions/pedagogical-stage'] ?? additionalData?.stage ?? null;
+    const scenario = extensions['https://example.edu/xapi/extensions/learner-scenario'] ?? additionalData?.scenario ?? null;
 
     const localStatement = await Statement.create({
         user: req.user._id,
         course: course?._id ?? null,
-        group,
+        group: groupId,
+        stage,
+        scenario,
         verb: {
             uri: verbUri,
             display: statement.verb?.display?.['en-US'] || '',
@@ -71,10 +82,7 @@ xapiRouter.post('/', auth.protect, async (req, res) => {
         }
 
         const lrsStatementId = Array.isArray(lrsData) ? lrsData[0] : lrsData;
-        await Statement.findByIdAndUpdate(localStatement._id, {
-            lrsSynced: true,
-            lrsStatementId,
-        });
+        await Statement.findByIdAndUpdate(localStatement._id, { lrsSynced: true, lrsStatementId });
 
         res.json({ success: true, localId: localStatement._id, lrsStatementId });
     } catch (err) {
@@ -88,8 +96,7 @@ xapiRouter.post('/', auth.protect, async (req, res) => {
 });
 
 // GET /api/xapi/statements
-// Student scoped: returns statements where the course and group match
-// one of the user's active enrollments.
+// Scoped to the student's own enrollments (course + group pairs)
 xapiRouter.get('/statements', auth.protect, async (req, res) => {
     try {
         if (req.query.source === 'lrs') {
@@ -116,12 +123,9 @@ xapiRouter.get('/statements', auth.protect, async (req, res) => {
             ? { $or: groupCourseFilters }
             : { user: req.user._id };
 
-        const statements = await Statement.find(query)
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .populate('user', 'username email')
-            .populate('course', 'courseCode name')
-            .lean();
+        const statements = await populateStatement(
+            Statement.find(query).sort({ createdAt: -1 }).limit(limit)
+        ).lean();
 
         res.json({ statements, total: statements.length });
     } catch (err) {
@@ -131,8 +135,6 @@ xapiRouter.get('/statements', auth.protect, async (req, res) => {
 });
 
 // GET /api/xapi/admin/statements (admin)
-// Unscoped. Returns all statements across all users and courses.
-// Supports optional filters: ?course=COMP3609 &group=group-a &verb=Implemented &userId=xxx
 xapiRouter.get('/admin/statements', auth.protect, auth.adminOnly, async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit) || 100, 500);
@@ -142,18 +144,17 @@ xapiRouter.get('/admin/statements', auth.protect, auth.adminOnly, async (req, re
             const course = await Course.findOne({ courseCode: req.query.course.toUpperCase() });
             if (course) filter.course = course._id;
         }
-        if (req.query.group) filter.group = req.query.group;
+        if (req.query.group) filter.group = req.query.group; // expects ObjectId string
+        if (req.query.stage) filter.stage = req.query.stage;
+        if (req.query.scenario) filter.scenario = req.query.scenario;
         if (req.query.userId) filter.user = req.query.userId;
         if (req.query.verb) {
             filter['verb.display'] = { $regex: req.query.verb, $options: 'i' };
         }
 
-        const statements = await Statement.find(filter)
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .populate('user', 'username email')
-            .populate('course', 'courseCode name')
-            .lean();
+        const statements = await populateStatement(
+            Statement.find(filter).sort({ createdAt: -1 }).limit(limit)
+        ).lean();
 
         res.json({ statements, total: statements.length });
     } catch (err) {
@@ -163,7 +164,6 @@ xapiRouter.get('/admin/statements', auth.protect, auth.adminOnly, async (req, re
 });
 
 // GET /api/xapi/admin/stats (admin)
-// Returns aggregated counts and breakdowns for the admin dashboard.
 xapiRouter.get('/admin/stats', auth.protect, auth.adminOnly, async (req, res) => {
     try {
         const [
@@ -174,6 +174,7 @@ xapiRouter.get('/admin/stats', auth.protect, auth.adminOnly, async (req, res) =>
             statementsByCourse,
             statementsByGroup,
             statementsByVerb,
+            statementsByStage,
             recentStatements,
         ] = await Promise.all([
             User.countDocuments({}),
@@ -181,7 +182,6 @@ xapiRouter.get('/admin/stats', auth.protect, auth.adminOnly, async (req, res) =>
             Enrollment.countDocuments({}),
             Statement.countDocuments({ lrsSynced: true }),
 
-            // Statements grouped by course
             Statement.aggregate([
                 { $match: { course: { $ne: null } } },
                 { $group: { _id: '$course', count: { $sum: 1 } } },
@@ -190,47 +190,41 @@ xapiRouter.get('/admin/stats', auth.protect, auth.adminOnly, async (req, res) =>
                 { $project: { courseCode: '$course.courseCode', name: '$course.name', count: 1 } },
             ]),
 
-            // Statements grouped by group
+            // Join groups to get name + slug in the aggregation
             Statement.aggregate([
                 { $match: { group: { $ne: null } } },
                 { $group: { _id: '$group', count: { $sum: 1 } } },
-                { $sort: { _id: 1 } },
+                { $lookup: { from: 'groups', localField: '_id', foreignField: '_id', as: 'group' } },
+                { $unwind: '$group' },
+                { $project: { name: '$group.name', slug: '$group.slug', count: 1 } },
+                { $sort: { name: 1 } },
             ]),
 
-            // Top 10 verbs by usage
             Statement.aggregate([
                 { $group: { _id: '$verb.display', count: { $sum: 1 } } },
                 { $sort: { count: -1 } },
                 { $limit: 10 },
             ]),
 
-            // Daily statement counts for the past 7 days
             Statement.aggregate([
-                {
-                    $match: {
-                        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-                    },
-                },
-                {
-                    $group: {
-                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-                        count: { $sum: 1 },
-                    },
-                },
+                { $match: { stage: { $ne: null } } },
+                { $group: { _id: '$stage', count: { $sum: 1 } } },
+                { $sort: { _id: 1 } },
+            ]),
+
+            Statement.aggregate([
+                { $match: { createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } },
+                { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
                 { $sort: { _id: 1 } },
             ]),
         ]);
 
         res.json({
-            totals: {
-                users: totalUsers,
-                statements: totalStatements,
-                enrollments: totalEnrollments,
-                lrsSynced,
-            },
+            totals: { users: totalUsers, statements: totalStatements, enrollments: totalEnrollments, lrsSynced },
             statementsByCourse,
             statementsByGroup,
             statementsByVerb,
+            statementsByStage,
             recentStatements,
         });
     } catch (err) {

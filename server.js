@@ -7,6 +7,7 @@ dotenv.config();
 import userRouter from './routes/userRoutes.js';
 import xapiRouter from './routes/xapiRoutes.js';
 import enrollmentRouter from './routes/enrollmentRoutes.js';
+import courseRouter from './routes/courseRoutes.js';
 
 
 
@@ -31,6 +32,7 @@ app.use(express.json());
 app.use('/api/user', userRouter);
 app.use('/api/xapi', xapiRouter);
 app.use('/api/enrollments', enrollmentRouter);
+app.use("/api/courses", courseRouter);
 
 app.get('/api/health', (_, res) => res.json({
   status: 'ok',

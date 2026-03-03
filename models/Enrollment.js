@@ -1,10 +1,6 @@
 import mongoose from 'mongoose';
 
 // One document per user per course.
-// Group is selected by the student when they first use a course
-// or can be updated by an admin later.
-
-
 const enrollmentSchema = new mongoose.Schema(
     {
         user: {
@@ -12,31 +8,25 @@ const enrollmentSchema = new mongoose.Schema(
             ref: 'User',
             required: true,
         },
-
-
         course: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Course',
             required: true,
         },
-
         group: {
-            type: String,
-            required: true,
-            enum: ['group-a', 'group-b', 'group-c'],
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Group',
+            default: null,
         },
-
         projectStatus: {
             type: String,
             enum: ['not-started', 'in-progress', 'completed'],
             default: 'not-started',
         },
-
         projectStartedAt: {
             type: Date,
             default: null,
         },
-
         projectCompletedAt: {
             type: Date,
             default: null,
