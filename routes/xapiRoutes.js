@@ -26,10 +26,13 @@ xapiRouter.post('/', auth.protect, async (req, res) => {
     }
 
     // Resolve course from verb URI
+    // URI format: https://student-analytics-app.vercel.app/xapi/verbs/comp3609/planned
+    // courseCode is the segment AFTER /verbs/
     let course = null;
     const verbUri = statement.verb?.id || '';
     if (verbUri.includes('student-analytics-app.vercel.app')) {
-        const courseCode = verbUri.split('/xapi/verbs/')[0]?.split('/').pop()?.toUpperCase();
+        const afterVerbs = verbUri.split('/xapi/verbs/')[1]; // "comp3609/planned"
+        const courseCode = afterVerbs?.split('/')[0]?.toUpperCase(); // "COMP3609"
         if (courseCode) course = await Course.findOne({ courseCode });
     }
 
