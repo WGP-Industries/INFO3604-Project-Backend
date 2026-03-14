@@ -1,8 +1,8 @@
-# INFO3604 Project - Backend
+# Praxis — Backend
 
 **Repository:** https://github.com/WGP-Industries/INFO3604-Project-Backend
 
-A Node.js REST API that handles authentication, xAPI statement ingestion, LRS forwarding, and enrollment management for the Student Analysis xAPI platform. Designed to support COMP 3609 (Game Programming) and COMP 3610 (Big Data Analytics).
+A Node.js REST API that handles authentication, xAPI statement ingestion, LRS forwarding, enrollment management, and bulk CSV import for the Praxis learning analytics platform. Designed to support COMP 3609 (Game Programming) and COMP 3610 (Big Data Analytics).
 
 ---
 
@@ -25,7 +25,7 @@ A Node.js REST API that handles authentication, xAPI statement ingestion, LRS fo
 
 ## Overview
 
-The backend stores user accounts, course definitions, group enrollments, and a local copy of every xAPI statement submitted. Each statement is also forwarded to a remote LRS (Veracity). Admins have access to unscoped data endpoints and aggregated statistics. All protected routes require a valid JWT and, where noted, an admin role.
+The backend stores user accounts, course definitions, group enrollments, and a local copy of every xAPI statement submitted. Each statement is also forwarded to a remote LRS (Veracity). Admins have access to unscoped data endpoints, aggregated statistics, and bulk CSV import tools for creating groups and enrolling students. All protected routes require a valid JWT and, where noted, an admin role.
 
 ---
 
@@ -47,24 +47,29 @@ The backend stores user accounts, course definitions, group enrollments, and a l
 
 ```
 ├── config/
-│   ├── db.js               # Mongoose connection
-│   └── lrs.js              # LRS header factory (reads env vars lazily)
+│   ├── db.js                   # Mongoose connection
+│   └── lrs.js                  # LRS header factory (reads env vars lazily)
 ├── middleware/
-│   └── auth.js             # protect (JWT guard) and adminOnly (role guard)
+│   └── auth.js                 # protect (JWT guard) and adminOnly (role guard)
 ├── models/
-│   ├── User.js             # username, email, password, role
-│   ├── Course.js           # courseCode, name, uri, project
-│   ├── Group.js            # name, slug, course
-│   ├── Enrollment.js       # user + course + group + projectStatus
-│   └── Statement.js        # xAPI statement local copy + LRS sync state
+│   ├── User.js                 # username, email, password, role
+│   ├── Course.js               # courseCode, name, uri, project
+│   ├── Group.js                # name, slug, course
+│   ├── Enrollment.js           # user + course + group + projectStatus
+│   └── Statement.js            # xAPI statement local copy + LRS sync state
+├── controllers/
+│   ├── userController.js       # Auth, profile, password change, user management
+│   ├── courseController.js     # Course and group CRUD + bulk group creation
+│   ├── enrollmentController.js # Enrollment CRUD + bulk CSV enroll
+│   └── xapiController.js       # Statement ingestion, retrieval, admin stats
 ├── routes/
-│   ├── userRoutes.js       # Auth and user management
-│   ├── courseRoutes.js     # Course and group management
-│   ├── xapiRoutes.js       # Statement ingestion, retrieval, admin stats
-│   └── enrollmentRoutes.js # Enrollment CRUD
+│   ├── userRoutes.js           # Route definitions for /api/user
+│   ├── courseRoutes.js         # Route definitions for /api/courses
+│   ├── enrollmentRoutes.js     # Route definitions for /api/enrollments
+│   └── xapiRoutes.js           # Route definitions for /api/xapi
 ├── scripts/
-│   └── seed.js             # Seeds courses and initial admin account
-└── server.js               # Express app entry point
+│   └── seed.js                 # Seeds courses and initial admin account
+└── server.js                   # Express app entry point
 ```
 
 ---
@@ -89,7 +94,7 @@ npm install
 
 ## Environment Variables
 
-Create a `.env` file in the project root. All five core variables are required - the server will exit on startup if any are missing.
+Create a `.env` file in the project root. All five core variables are required — the server will exit on startup if any are missing.
 
 ```env
 MONGODB_URI=mongodb://localhost:27017/info3604
@@ -115,7 +120,7 @@ CORS_ORIGIN=http://localhost:5173
 
 ### Important Note on Environment Variable Loading
 
-`dotenv.config()` is called as the very first statement in `server.js`, before any other imports. This is required because Node.js ESM hoists and evaluates all `import` statements before any code runs. Any module that reads `process.env` at the top level - outside of a function - will receive `undefined` if `dotenv.config()` has not already executed.
+`dotenv.config()` is called as the very first statement in `server.js`, before any other imports. This is required because Node.js ESM hoists and evaluates all `import` statements before any code runs. Any module that reads `process.env` at the top level — outside of a function — will receive `undefined` if `dotenv.config()` has not already executed.
 
 All LRS configuration in `config/lrs.js` reads `process.env` lazily inside the `lrsHeaders()` function rather than at module load time, for the same reason.
 
@@ -133,8 +138,8 @@ This will upsert the following courses:
 
 | Course Code | Project                                                                                                                             |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| COMP3609    | 2D Platform Game - Java 2D Graphics API, game loop, animated sprites, collision detection, sound, tile maps, design patterns        |
-| COMP3610    | Data Analytics Application - real-world dataset, analysis algorithms, working application or dashboard, IEEE-formatted final report |
+| COMP3609    | 2D Platform Game — Java 2D Graphics API, game loop, animated sprites, collision detection, sound, tile maps, design patterns        |
+| COMP3610    | Data Analytics Application — real-world dataset, analysis algorithms, working application or dashboard, IEEE-formatted final report |
 
 It will also create an admin user if one does not already exist. If the user exists but lacks the admin role, the role is corrected automatically.
 
@@ -145,7 +150,7 @@ Email:    admin@example.edu
 Password: Admin@1234
 ```
 
-Change the admin password after first login.
+Change the admin password after first login using the Change Password option in the dashboard header.
 
 ---
 
@@ -185,16 +190,17 @@ router.get("/route", auth.protect, auth.adminOnly, handler);
 
 ## API Reference
 
-### User - `/api/user`
+### User — `/api/user`
 
-| Method | Path        | Auth    | Description                              |
-| ------ | ----------- | ------- | ---------------------------------------- |
-| POST   | `/register` | None    | Register a new student account           |
-| POST   | `/login`    | None    | Authenticate and receive a JWT           |
-| GET    | `/me`       | Student | Return the current authenticated user    |
-| GET    | `/all`      | Admin   | List all users sorted by creation date   |
-| PATCH  | `/:id/role` | Admin   | Set a user's role (`student` or `admin`) |
-| DELETE | `/:id`      | Admin   | Delete a user account                    |
+| Method | Path           | Auth    | Description                              |
+| ------ | -------------- | ------- | ---------------------------------------- |
+| POST   | `/register`    | None    | Register a new student account           |
+| POST   | `/login`       | None    | Authenticate and receive a JWT           |
+| GET    | `/me`          | Student | Return the current authenticated user    |
+| PATCH  | `/me/password` | Student | Change the current user's password       |
+| GET    | `/all`         | Admin   | List all users sorted by creation date   |
+| PATCH  | `/:id/role`    | Admin   | Set a user's role (`student` or `admin`) |
+| DELETE | `/:id`         | Admin   | Delete a user account                    |
 
 **Register body:**
 
@@ -204,8 +210,11 @@ router.get("/route", auth.protect, auth.adminOnly, handler);
 
 **Login body:**
 
+Accepts either email or username in the `identifier` field.
+
 ```json
-{ "email": "jane@example.com", "password": "secret123" }
+{ "identifier": "jane@example.com", "password": "secret123" }
+{ "identifier": "jane.doe", "password": "secret123" }
 ```
 
 **Login / Register response:**
@@ -217,26 +226,42 @@ router.get("/route", auth.protect, auth.adminOnly, handler);
 }
 ```
 
----
-
-### Courses - `/api/courses`
-
-| Method | Path                           | Auth    | Description                     |
-| ------ | ------------------------------ | ------- | ------------------------------- |
-| GET    | `/`                            | Student | List all courses                |
-| GET    | `/:courseCode/groups`          | Student | List all groups for a course    |
-| POST   | `/:courseCode/groups`          | Admin   | Create a new group for a course |
-| DELETE | `/:courseCode/groups/:groupId` | Admin   | Delete a group from a course    |
-
-**POST `/:courseCode/groups` body:**
+**PATCH `/me/password` body:**
 
 ```json
-{ "name": "Group D", "slug": "group-d" }
+{ "currentPassword": "oldpass", "newPassword": "newpass" }
 ```
 
 ---
 
-### xAPI - `/api/xapi`
+### Courses — `/api/courses`
+
+| Method | Path                           | Auth    | Description                          |
+| ------ | ------------------------------ | ------- | ------------------------------------ |
+| GET    | `/`                            | None    | List all courses                     |
+| GET    | `/:courseCode`                 | None    | Get a single course by code          |
+| GET    | `/:courseCode/groups`          | None    | List all groups for a course         |
+| POST   | `/:courseCode/groups`          | Student | Create a new group for a course      |
+| POST   | `/:courseCode/groups/bulk`     | Admin   | Bulk create groups from a CSV string |
+| DELETE | `/:courseCode/groups/:groupId` | Admin   | Delete a group from a course         |
+
+**POST `/:courseCode/groups` body:**
+
+```json
+{ "name": "Group D" }
+```
+
+**POST `/:courseCode/groups/bulk` body:**
+
+```json
+{ "csv": "name\nGroup A\nGroup B\nGroup C" }
+```
+
+Returns `{ results: { created, skipped, failed }, groups }`.
+
+---
+
+### xAPI — `/api/xapi`
 
 | Method | Path                | Auth    | Description                                           |
 | ------ | ------------------- | ------- | ----------------------------------------------------- |
@@ -252,23 +277,25 @@ router.get("/route", auth.protect, auth.adminOnly, handler);
   "statement": {},
   "additionalData": {
     "description": "Optional context string",
-    "courseId": "comp3609"
+    "stage": "Construction",
+    "problemStep": "Mechanics Implementation"
   }
 }
 ```
 
-The verb URI is inspected to resolve the course automatically. A URI containing `example.edu/comp3609` maps to COMP3609 and `example.edu/comp3610` maps to COMP3610. The user's group is resolved from their enrollment in that course at the time of submission.
+The verb URI is inspected to resolve the course automatically. The format `https://student-analytics-app.vercel.app/xapi/verbs/{courseCode}/{verbName}` is used — the `courseCode` segment is extracted and matched against the Course collection. The user's group is resolved from their enrollment in that course at the time of submission.
 
 **GET `/api/xapi/admin/statements` query parameters:**
 
-| Parameter | Description                                         |
-| --------- | --------------------------------------------------- |
-| `course`  | Filter by course code, e.g. `COMP3609`              |
-| `group`   | Filter by group ObjectId string                     |
-| `verb`    | Case-insensitive partial match on verb display name |
-| `stage`   | Filter by stage value                               |
-| `userId`  | Filter by user ObjectId                             |
-| `limit`   | Maximum records to return (default 100, max 500)    |
+| Parameter     | Description                                         |
+| ------------- | --------------------------------------------------- |
+| `course`      | Filter by course code, e.g. `COMP3609`              |
+| `group`       | Filter by group ObjectId string                     |
+| `verb`        | Case-insensitive partial match on verb display name |
+| `stage`       | Filter by stage value                               |
+| `problemStep` | Filter by problem step value                        |
+| `userId`      | Filter by user ObjectId                             |
+| `limit`       | Maximum records to return (default 100, max 500)    |
 
 **GET `/api/xapi/admin/stats` response shape:**
 
@@ -278,14 +305,15 @@ The verb URI is inspected to resolve the course automatically. A URI containing 
   "statementsByCourse": [{ "courseCode": "COMP3609", "count": 0 }],
   "statementsByGroup": [{ "name": "Group A", "slug": "group-a", "count": 0 }],
   "statementsByVerb": [{ "_id": "Implemented", "count": 0 }],
-  "statementsByStage": [{ "_id": "stage-value", "count": 0 }],
+  "statementsByStage": [{ "_id": "Construction", "count": 0 }],
+  "statementsByStep": [{ "_id": "Mechanics Implementation", "count": 0 }],
   "recentStatements": [{ "_id": "2025-01-01", "count": 0 }]
 }
 ```
 
 ---
 
-### Enrollments - `/api/enrollments`
+### Enrollments — `/api/enrollments`
 
 | Method | Path              | Auth    | Description                                             |
 | ------ | ----------------- | ------- | ------------------------------------------------------- |
@@ -294,6 +322,7 @@ The verb URI is inspected to resolve the course automatically. A URI containing 
 | POST   | `/join`           | Student | Join or switch group for a course                       |
 | GET    | `/`               | Admin   | All enrollments, filterable by `?course=` and `?group=` |
 | POST   | `/`               | Admin   | Manually enroll a student by email                      |
+| POST   | `/bulk`           | Admin   | Bulk enroll students from a CSV string                  |
 | PATCH  | `/:id`            | Admin   | Update group or project status                          |
 | DELETE | `/:id`            | Admin   | Remove an enrollment                                    |
 
@@ -312,6 +341,22 @@ The verb URI is inspected to resolve the course automatically. A URI containing 
   "groupId": "<ObjectId>"
 }
 ```
+
+**POST `/api/enrollments/bulk` body:**
+
+```json
+{ "csv": "...", "onDuplicate": "skip" }
+```
+
+`onDuplicate` accepts `skip` (default) or `overwrite`. The CSV is flexible — any combination of `username`, `email`, `password`, `comp3609`, and `comp3610` columns is accepted. Missing fields are derived:
+
+| Missing field | Derivation                |
+| ------------- | ------------------------- |
+| `email`       | `{username}@my.uwi.edu`   |
+| `username`    | Part of email before `@`  |
+| `password`    | Default `studentUWi@1234` |
+
+Groups named in `comp3609`/`comp3610` columns are created automatically if they do not already exist. Returns `{ results: { enrolled, created, skipped, failed } }`.
 
 **PATCH `/api/enrollments/:id` body:**
 
@@ -338,12 +383,13 @@ Valid project statuses: `not-started`, `in-progress`, `completed`. Setting `comp
 
 | Field                 | Type   | Notes                                        |
 | --------------------- | ------ | -------------------------------------------- |
-| `courseCode`          | String | Unique, uppercase - `COMP3609` or `COMP3610` |
+| `courseCode`          | String | Unique, uppercase — `COMP3609` or `COMP3610` |
 | `name`                | String | Full display name                            |
 | `description`         | String | Course summary                               |
 | `uri`                 | String | xAPI activity ID base                        |
 | `project.name`        | String | Project title                                |
 | `project.description` | String | Project summary                              |
+| `project.uri`         | String | xAPI activity IRI for the project            |
 
 ### Group
 
@@ -366,7 +412,7 @@ Unique index on `{ course, slug }`.
 | `projectStartedAt`   | Date     | Set on first join                         |
 | `projectCompletedAt` | Date     | Set when status is marked completed       |
 
-Unique index on `{ user, course }` - one enrollment per student per course.
+Unique index on `{ user, course }` — one enrollment per student per course.
 
 ### Statement
 
@@ -377,14 +423,14 @@ Unique index on `{ user, course }` - one enrollment per student per course.
 | `group`          | ObjectId | Ref: Group, resolved from enrollment at submission time |
 | `verb.uri`       | String   | Full verb URI                                           |
 | `verb.display`   | String   | Human-readable verb label                               |
-| `stage`          | String   | Stage of the activity                                   |
-| `scenario`       | String   | Scenario context for the statement                      |
+| `stage`          | String   | Pedagogical stage                                       |
+| `problemStep`    | String   | Course-specific project step                            |
 | `description`    | String   | Optional context, max 500 characters                    |
 | `rawStatement`   | Mixed    | Full xAPI statement JSON                                |
 | `lrsSynced`      | Boolean  | True once LRS confirms receipt                          |
 | `lrsStatementId` | String   | ID returned by the LRS                                  |
 
-Indexes on `{ user, createdAt }`, `{ group, createdAt }`, `{ course, createdAt }`.
+Indexes on `{ user, createdAt }`, `{ group, createdAt }`, `{ course, createdAt }`, `{ stage, createdAt }`, `{ problemStep }`.
 
 ---
 
@@ -396,5 +442,3 @@ When a statement is submitted to `POST /api/xapi`, the server:
 2. Forwards the raw xAPI statement to `process.env.LRS_ENDPOINT` using HTTP Basic Auth headers built by `lrsHeaders()`.
 3. If the LRS accepts the statement, updates the local record with `lrsSynced: true` and stores the returned `lrsStatementId`.
 4. If the LRS is unreachable or rejects the statement, the local record is retained and the response indicates partial success. Failed statements can be identified via `lrsSynced: false`.
-
-Login events are also sent to the LRS as fire-and-forget statements on every successful authentication. Failures are logged server-side but do not affect the login response.

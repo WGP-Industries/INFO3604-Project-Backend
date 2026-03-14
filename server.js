@@ -72,6 +72,8 @@ connectDB().then(() => {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
+    }
   });
 });

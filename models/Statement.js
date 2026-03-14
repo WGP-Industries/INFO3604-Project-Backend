@@ -26,11 +26,13 @@ const statementSchema = new mongoose.Schema(
             enum: ['Planning', 'Exploration', 'Construction', 'Testing', 'Reflection', null],
             default: null,
         },
-        scenario: {
+        problemStep: {
             type: String,
-            enum: ['Planner', 'Tinkerer', 'LateTester', null],
+            trim: true,
             default: null,
         },
+        // scenario is intentionally excluded from collection but kept here for easy re-enable
+        // scenario: { type: String, enum: ['Planner', 'Tinkerer', 'LateTester', null], default: null },
         description: {
             type: String,
             trim: true,
@@ -56,7 +58,7 @@ statementSchema.index({ user: 1, createdAt: -1 });
 statementSchema.index({ group: 1, createdAt: -1 });
 statementSchema.index({ course: 1, createdAt: -1 });
 statementSchema.index({ stage: 1, createdAt: -1 });
-statementSchema.index({ scenario: 1 });
+statementSchema.index({ problemStep: 1 });
 
 const Statement = mongoose.model('Statement', statementSchema);
 export default Statement;
