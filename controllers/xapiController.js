@@ -21,16 +21,25 @@ export const submitStatement = async (req, res) => {
         return res.status(400).json({ message: 'xAPI statement is required' });
     }
 
-    // Resolve course from verb URI format: .../xapi/verbs/{courseCode}/{verbName}
+    // ── Resolve course ─────────────────────────────────────────────────────────
+    // Primary: courseCode from additionalData (direct, reliable).
+    // Fallback: parse from verb URI for backwards compatibility with any older
+    //           clients that may not send additionalData.courseCode yet.
     let course = null;
     const verbUri = statement.verb?.id || '';
-    if (verbUri.includes('student-analytics-app.vercel.app')) {
-        const afterVerbs = verbUri.split('/xapi/verbs/')[1];
-        const courseCode = afterVerbs?.split('/')[0]?.toUpperCase();
-        if (courseCode) course = await Course.findOne({ courseCode });
-    }
 
-    // Resolve group ObjectId from the user's enrollment
+    const rawCourseCode = additionalData?.courseCode?.toUpperCase?.()
+        ?? (() => {
+            // fallback: .../xapi/verbs/{courseCode}/{verbName}
+            const afterVerbs = verbUri.split('/xapi/verbs/')[1];
+            return afterVerbs?.split('/')[0]?.toUpperCase() ?? null;
+        })();
+
+    if (rawCourseCode) course = await Course.findOne({ courseCode: rawCourseCode });
+
+    // ── Resolve group from the server-side enrollment ──────────────────────────
+    // We always re-resolve from the DB rather than trusting the client payload,
+    // so the stored groupId is authoritative even if the client sends stale data.
     let groupId = null;
     if (course) {
         const enrollment = await Enrollment.findOne({
@@ -40,25 +49,28 @@ export const submitStatement = async (req, res) => {
         groupId = enrollment?.group ?? null;
     }
 
+    // ── Extract metadata ───────────────────────────────────────────────────────
     const extensions = statement.context?.extensions ?? {};
-    const stage = additionalData?.stage ?? extensions[`${BASE_URI}/extensions/pedagogical-stage`] ?? null;
-    const problemStep = additionalData?.problemStep ?? null;
-    // scenario excluded from save — re-enable by uncommenting:
-    // const scenario = additionalData?.scenario ?? null;
+    const stage = additionalData?.stage
+        ?? extensions[`${BASE_URI}/extensions/pedagogical-stage`]
+        ?? null;
+    const problemStep = additionalData?.problemStep
+        ?? extensions[`${BASE_URI}/extensions/problem-step`]
+        ?? null;
 
     const localStatement = await Statement.create({
-        user: req.user._id,
-        course: course?._id ?? null,
-        group: groupId,
+        user:        req.user._id,
+        course:      course?._id ?? null,
+        group:       groupId,
         stage,
         problemStep,
         verb: {
-            uri: verbUri,
+            uri:     verbUri,
             display: statement.verb?.display?.['en-US'] || '',
         },
-        description: additionalData?.description || '',
+        description:  additionalData?.description || '',
         rawStatement: statement,
-        lrsSynced: false,
+        lrsSynced:    false,
     });
 
     // Forward to LRS
