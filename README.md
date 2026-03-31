@@ -111,7 +111,7 @@ CORS_ORIGIN=http://localhost:5173
 | ---------------- | ---------------------------------------------------- |
 | `MONGODB_URI`    | Full MongoDB connection string                       |
 | `JWT_SECRET`     | Secret used to sign and verify tokens                |
-| `JWT_EXPIRES_IN` | Token lifetime, e.g. `7d`, `24h`                     |
+| `JWT_EXPIRES_IN` | Token lifetime, e.g. `7d`, `24h`                    |
 | `LRS_ENDPOINT`   | Full URL to the xAPI statements endpoint on your LRS |
 | `LRS_USERNAME`   | LRS Basic Auth username                              |
 | `LRS_PASSWORD`   | LRS Basic Auth password                              |
@@ -335,11 +335,7 @@ The verb URI is inspected to resolve the course automatically. The format `https
 **POST `/api/enrollments` (admin) body:**
 
 ```json
-{
-  "email": "student@example.com",
-  "courseCode": "COMP3610",
-  "groupId": "<ObjectId>"
-}
+{ "email": "student@example.com", "courseCode": "COMP3610", "groupId": "<ObjectId>" }
 ```
 
 **POST `/api/enrollments/bulk` body:**
