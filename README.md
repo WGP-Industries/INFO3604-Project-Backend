@@ -1,6 +1,8 @@
 # Praxis — Backend
 
-**Repository:** https://github.com/WGP-Industries/INFO3604-Project-Backend
+**Frontend:** https://github.com/WGP-Industries/Student-Analysis-xAPI-project
+
+**Backend:** https://github.com/WGP-Industries/INFO3604-Project-Backend
 
 A Node.js REST API that handles authentication, xAPI statement ingestion, LRS forwarding, enrollment management, and bulk CSV import for the Praxis learning analytics platform. Designed to support COMP 3609 (Game Programming) and COMP 3610 (Big Data Analytics).
 
